@@ -1,0 +1,62 @@
+[project]
+name = "s2s-mcp"
+version = "0.1.0"
+description = "Hosted MCP server that composes acmadDL and africas2s into seasonal-forecast recipes for thin agents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "accord-research" }]
+keywords = ["climate", "seasonal-forecasting", "mcp", "agents"]
+dependencies = [
+    "mcp>=2.2",
+    # The two libraries this server composes. It adds recipes and plumbing on
+    # top of their public verbs and their MCP tool functions; it holds no
+    # data-access or forecasting logic of its own.
+    "acmadDL[mcp]>=0.2",
+    "africas2s[mcp]>=0.2",
+    "xarray",
+    "numpy",
+]
+
+[project.urls]
+Repository = "https://github.com/accord-research/s2s-mcp"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "httpx"]
+# Shapefile regions for fetch(region="x.shp") and zonal statistics.
+geo = ["acmadDL[geo]"]
+
+[project.scripts]
+s2s-mcp = "s2s_mcp.server:main"
+
+[tool.uv.sources]
+# Until the [mcp] extras land on PyPI (acmadDL / africas2s > 0.2.0), resolve
+# both from their feature branches. Flip to plain PyPI pins after release.
+acmadDL = { git = "https://github.com/ACMAD-Niamey/acmadDL", branch = "feature/mcp-server" }
+africas2s = { git = "https://github.com/ACMAD-Niamey/africas2s", branch = "feature/mcp-server" }
+
+[tool.uv]
+# sheerwater (via acmadDL) pins zarr==2.18.3; acmadDL's own override relaxes
+# it so icechunk can co-resolve. Mirror that here so the host env resolves.
+override-dependencies = ["zarr>=2.18.3"]
+# eccodeslib only ships wheels for some platforms at its newest versions;
+# listing the environments we develop and deploy on makes uv pick a version
+# with wheels for all of them (Linux containers in production, Apple Silicon
+# laptops for development).
+required-environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/s2s_mcp"]
+# The skill ships in the wheel: the hosted server serves it as a resource.
+force-include = { "skills/s2s" = "s2s_mcp/skill" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

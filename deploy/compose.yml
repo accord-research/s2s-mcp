@@ -1,0 +1,19 @@
+services:
+  s2s-mcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports: ["8080:8080"]
+    environment:
+      # Provider credentials live on the host, never with the agencies.
+      CDSAPI_URL: ${CDSAPI_URL:-https://cds.climate.copernicus.eu/api}
+      CDSAPI_KEY: ${CDSAPI_KEY}
+      # Tenant resolution: "header" trusts X-S2S-Tenant from the auth proxy in
+      # front of this container; "single" serves everything as one tenant.
+      S2S_TENANT_MODE: ${S2S_TENANT_MODE:-single}
+    volumes:
+      - cache:/data/cache
+      - outputs:/data/outputs
+volumes:
+  cache:
+  outputs:
