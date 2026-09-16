@@ -30,10 +30,11 @@ geo = ["acmadDL[geo]"]
 s2s-mcp = "s2s_mcp.server:main"
 
 [tool.uv.sources]
-# Until the [mcp] extras land on PyPI (acmadDL / africas2s > 0.2.0), resolve
-# both from their feature branches. Flip to plain PyPI pins after release.
-acmadDL = { git = "https://github.com/ACMAD-Niamey/acmadDL", branch = "feature/mcp-server" }
-africas2s = { git = "https://github.com/ACMAD-Niamey/africas2s", branch = "feature/mcp-server" }
+# The MCP servers are merged on main but not yet released to PyPI (latest
+# there is 0.2.0 without the [mcp] extra). Track main until the next release,
+# then delete this block so the PyPI pins above take over.
+acmadDL = { git = "https://github.com/ACMAD-Niamey/acmadDL", branch = "main" }
+africas2s = { git = "https://github.com/ACMAD-Niamey/africas2s", branch = "main" }
 
 [tool.uv]
 # sheerwater (via acmadDL) pins zarr==2.18.3; acmadDL's own override relaxes

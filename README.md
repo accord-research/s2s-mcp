@@ -76,4 +76,4 @@ uv sync --extra dev
 uv run pytest -q
 ```
 
-Tests use synthetic data and stub acmadDL's network verbs; the africas2s pipeline runs for real. Until the `[mcp]` extras are released on PyPI, `pyproject.toml` resolves the two libraries from their `feature/mcp-server` branches; flip the `[tool.uv.sources]` block to PyPI pins after release.
+Tests use synthetic data and stub acmadDL's network verbs; the africas2s pipeline runs for real. Until the `[mcp]` extras are released on PyPI, `pyproject.toml` resolves the two libraries from their `main` branches; delete the `[tool.uv.sources]` block after release so the PyPI pins take over.
