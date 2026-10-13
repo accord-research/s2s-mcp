@@ -24,7 +24,13 @@ Returns handles for the tercile map (PNG), the tercile forecast `(tercile, lat, 
 - `init` is the issuance month; `target` the season (`MAM`, `JJAS`, `OND`). Wrap-around seasons (`DJF`, `NDJ`) are not supported for the predictand yet.
 - `models` are forecast product ids and `predictand` an `obs/...` product id, both from `list_products`.
 - `method="cca"` is the PyCPT-style default; `"climatology"` is the no-skill baseline to compare against.
+- `seasonal_outlook` may answer `status: "running"` when a first run for a region outlives the call: tell the user it is computing, then call again with the same arguments after `poll_after_seconds` (`wait_seconds` up to 55 per call) until `status: "done"`.
+- `models` defaults to the six NMME precipitation models; keep several models unless the user names one. With a single model, only `method="cca"` yields graded forecast-year probabilities; the other methods pool across models and return 0/1 maps when there is one.
 - First runs take minutes (provider queues); repeats are cached on the server.
+
+The result also carries `bounds` (`[lat_s, lat_n, lon_w, lon_e]` of the forecast grid), `request` (the arguments used, so a variant is one field away), `highlights` (area shares of the dominant tercile for the region and per country, the strongest wet and dry signals, a one-word skill verdict, a `region_label`) and `summary` (one sentence built from the highlights). Use the highlights when describing the outlook; they are computed, not read off the map. The same request twice returns the cached result instantly.
+
+In hosts with MCP Apps the result renders as an interactive map; `outlook_grid` exists for that widget and is not meant for agents.
 
 ## Custom chains: run_pipeline
 
