@@ -28,4 +28,4 @@ Read [`skills/s2s/SKILL.md`](skills/s2s/SKILL.md) and the module docstrings in `
 - Every tool: schema-level parameter descriptions (`Annotated[..., Field(description=...)]`), enums for closed vocabularies, a `Returns:` line, one example, `ToolAnnotations` via the local `tool()` decorator. Re-raise library errors as `ToolError` so agents see the message.
 - Outputs are handles, never host paths, in anything an agent sees. Resolve handles against the caller's tenant.
 - MCP protocol target: 2026-07-28 (mcp SDK 2.x). Do not add SSE, Roots, Sampling, or Logging; they are deprecated.
-- The widget bundle (`src/s2s_mcp/web/outlook.html`) is checked in; it must stay self-contained (no external script/style/connect origins) and under 1 MB. Run tests as `uv run python -m pytest -q`.
+- The widget bundle (`src/s2s_mcp/web/outlook.html`) is checked in; it must stay self-contained (no external script/style/connect origins) and under 1 MB. Run tests as `uv run pytest -q` (the same command CI uses; the repo root is on pytest's path via `pythonpath` in pyproject).

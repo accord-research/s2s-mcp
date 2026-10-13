@@ -102,7 +102,7 @@ Implements MCP revision 2026-07-28 through the `mcp` 2.x SDK: stateless core, `s
 
 ```bash
 uv sync --extra dev
-uv run python -m pytest -q
+uv run pytest -q
 cd web && npm install && npm test   # widget unit tests (vitest)
 ```
 
