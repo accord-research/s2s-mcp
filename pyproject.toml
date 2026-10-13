@@ -61,3 +61,4 @@ force-include = { "skills/s2s" = "s2s_mcp/skill" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]   # tests import helpers as `tests.conftest`; works under bare `pytest` and `python -m pytest` alike

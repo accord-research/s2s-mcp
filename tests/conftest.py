@@ -82,3 +82,12 @@ def fake_acmaddl(monkeypatch, gcm, obs):
     monkeypatch.setattr(acmaddl, "fetch", _fetch)
     monkeypatch.setattr(acmaddl, "assemble", _assemble)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def _fresh_jobs():
+    """Background jobs are process-global; give every test its own registry."""
+    from s2s_mcp import jobs
+
+    jobs.registry = jobs.Registry()
+    yield

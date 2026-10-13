@@ -4,11 +4,15 @@ import pytest
 from mcp.client import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
+from mcp.client import advertise
+from mcp.server.apps import APP_MIME_TYPE, EXTENSION_ID
+
+from s2s_mcp import apps as _apps
 from s2s_mcp import handles, server
 from tests.conftest import run
 
 DEFAULT_TOOLS = {"seasonal_outlook", "run_pipeline", "list_operations", "describe_operation",
-                 "list_products", "describe_dataset", "list_outputs", "get_output"}
+                 "list_products", "describe_dataset", "list_outputs", "get_output", "outlook_grid"}
 
 
 def test_default_surface_is_small():
@@ -122,3 +126,122 @@ def test_main_flags(monkeypatch):
     assert seen["t"] == "stdio"
     with pytest.raises(SystemExit):
         server.main(["--transport", "sse"])
+
+
+def test_outlook_tool_is_an_mcp_app():
+    tools = {t.name: t for t in run(server.mcp.list_tools())}
+    meta = tools["seasonal_outlook"].meta
+    assert meta["ui"] == {"resourceUri": "ui://s2s/outlook"}
+    assert meta["openai/outputTemplate"] == "ui://s2s/outlook"
+    assert meta["openai/widgetAccessible"] is True
+    assert meta["openai/toolInvocation/invoking"] and meta["openai/toolInvocation/invoked"]
+    assert tools["outlook_grid"].meta == {"ui": {"visibility": ["app"]}}
+    assert "two-to-three sentence" in tools["seasonal_outlook"].description
+
+
+def test_outlook_resource_is_served_as_app():
+    async def scenario():
+        async with Client(server.mcp, extensions=[advertise(EXTENSION_ID, {"mimeTypes": [APP_MIME_TYPE]})]) as client:
+            assert EXTENSION_ID in client.server_capabilities.extensions
+            listed = {str(r.uri): r for r in (await client.list_resources()).resources}
+            assert listed["ui://s2s/outlook"].mime_type == APP_MIME_TYPE
+            assert listed["ui://s2s/outlook"].meta == {"ui": {"prefersBorder": True}}
+            read = await client.read_resource("ui://s2s/outlook")
+            body = read.contents[0]
+            assert body.mime_type == APP_MIME_TYPE
+            assert body.text.lstrip().lower().startswith("<!doctype html>")
+
+    run(scenario())
+
+
+def _outlook(**over):
+    args = dict(init="2025-02", target="MAM", region=[-10, 4, 30, 40], models=["nmme/ccsm4"],
+                hindcast=[1993, 2015], method="climatology")
+    args.update(over)
+    return server.seasonal_outlook(**args)
+
+
+def test_outlook_grid_roundtrip(fake_acmaddl):
+    out = _outlook()
+    payload = server.outlook_grid(out["tercile_forecast"], max_cells=50)
+    assert payload["handle"] == out["tercile_forecast"]
+    assert payload["factor"] == 2 and len(payload["lat"]) == 6 and len(payload["below"]) == 36
+    assert payload["bounds"] == pytest.approx(out["bounds"])
+    assert payload["style"]["name"] == "acmad" and len(payload["style"]["prob_bins"]) == 7
+    json.dumps(payload)
+
+
+def test_outlook_grid_rejects_wrong_dims(fake_acmaddl):
+    out = _outlook()
+    with pytest.raises(ToolError, match=r"\(tercile, lat, lon\)"):
+        server.outlook_grid(out["deterministic"])
+    with pytest.raises(ToolError, match="not an output handle"):
+        server.outlook_grid("nope")
+
+
+def test_widget_html_placeholder_when_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(_apps, "OUTLOOK_HTML", tmp_path / "missing.html")
+    html = _apps.widget_html()
+    assert html.lower().startswith("<!doctype html>") and "npm run build" in html
+
+
+def test_built_widget_is_shipped():
+    html = _apps.OUTLOOK_HTML.read_text(encoding="utf-8")
+    assert html.lower().startswith("<!doctype html>")
+    assert "npm run build" not in html, "placeholder is still checked in; run npm run build in web/"
+    assert '<script type="module"' in html
+    assert 'src="http' not in html and 'href="http' not in html     # no external origins (CSP is deny-by-default)
+    assert _apps.OUTLOOK_HTML.stat().st_size < 1_000_000
+    assert (_apps.WEB_DIR / "africa-countries.geojson").stat().st_size > 10_000
+
+
+def test_outlook_grid_multivariable_error_names_handle_not_path():
+    import numpy as np
+    import xarray as xr
+
+    handle, path = handles.reserve("default", ".nc")
+    xr.Dataset({"a": (("lat", "lon"), np.zeros((2, 2))), "b": (("lat", "lon"), np.zeros((2, 2)))},
+               coords={"lat": [0.0, 1.0], "lon": [0.0, 1.0]}).to_netcdf(path)
+    handles.register("default", handle, kind="dataset", label="t")
+    with pytest.raises(ToolError) as err:
+        server.outlook_grid(handle)
+    assert handle in str(err.value) and "single" in str(err.value)
+    assert str(path) not in str(err.value) and str(path.parent) not in str(err.value)
+
+
+NMME_SIX = ["nmme/ccsm4", "nmme/cfsv2", "nmme/geoss2s", "nmme/cansipsic4", "nmme/spear", "nmme/cesm1"]
+
+
+def test_outlook_defaults_to_six_nmme_models():
+    """A single model gives africas2s's pooled tercile path no spread (0/1 maps);
+    the default roster is every NMME precipitation model acmaddl serves."""
+    tools = {t.name: t for t in run(server.mcp.list_tools())}
+    assert tools["seasonal_outlook"].input_schema["properties"]["models"]["default"] == NMME_SIX
+
+
+def test_outlook_tool_returns_running_for_slow_runs_then_done(monkeypatch, fake_acmaddl):
+    """A cold run outlives the host's call budget: the tool hands back a
+    `running` status instead of timing out, and a later call collects the result."""
+    import threading
+
+    from s2s_mcp import recipes
+
+    gate = threading.Event()
+    real = recipes.seasonal_outlook
+
+    def slow(**kw):
+        gate.wait(10)
+        return real(**kw)
+
+    monkeypatch.setattr(recipes, "seasonal_outlook", slow)
+    first = _outlook(wait_seconds=0)
+    assert first["status"] == "running"
+    assert first["request"]["method"] == "climatology" and first["poll_after_seconds"] >= 1
+    assert "tercile_forecast" not in first
+    gate.set()
+    second = _outlook(wait_seconds=30)
+    assert second["status"] == "done" and handles.is_handle(second["tercile_forecast"])
+
+
+def test_outlook_tool_marks_complete_results_done(fake_acmaddl):
+    assert _outlook()["status"] == "done"

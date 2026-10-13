@@ -27,7 +27,8 @@ from pydantic import Field
 from acmaddl.mcp import server as _acmaddl
 from africas2s.mcp import server as _africas2s
 
-from . import handles, pipeline, recipes
+from . import grid, handles, jobs, pipeline, recipes
+from .apps import APP_ONLY_META, OUTLOOK_TOOL_META, OUTLOOK_URI, apps
 from .tenancy import tenant_dir, tenant_from_headers, tenant_mode
 
 _SKILL_DIR = Path(__file__).resolve().parents[2] / "skills" / "s2s"
@@ -77,17 +78,18 @@ mcp = MCPServer(
     version=_dist_version(),
     website_url="https://github.com/accord-research/s2s-mcp",
     cache_hints=_CACHE_HINTS,
+    extensions=[apps],
 )
 
 
 def tool(*, read_only: bool = False, idempotent: bool = True, open_world: bool = False,
-         destructive: bool = False, **kwargs):
+         destructive: bool = False, meta: dict | None = None, **kwargs):
     annotations = ToolAnnotations(read_only_hint=read_only, destructive_hint=destructive,
                                   idempotent_hint=idempotent, open_world_hint=open_world)
 
     def decorate(fn):
         description = kwargs.pop("description", None) or inspect.cleandoc(fn.__doc__ or "")
-        return mcp.tool(annotations=annotations, description=description, **kwargs)(fn)
+        return mcp.tool(annotations=annotations, description=description, meta=meta, **kwargs)(fn)
 
     return decorate
 
@@ -111,14 +113,25 @@ RegionArg = Annotated[list[float] | str, Field(
                 "for East Africa, or a shapefile path on the server.")]
 
 
-@tool(open_world=True, idempotent=False)
+# Every NMME product that serves precipitation. Pooled tercile probabilities need
+# spread across models, so a single-model default produced 0/1 maps.
+# How soon a widget or agent should ask again after a "running" answer.
+POLL_AFTER_SECONDS = 8
+# Default in-call wait before answering "running"; hosts budget about a minute per call.
+DEFAULT_WAIT_SECONDS = int(os.environ.get("S2S_OUTLOOK_WAIT_SECONDS", "45"))
+
+NMME_PRECIP_MODELS = ["nmme/ccsm4", "nmme/cfsv2", "nmme/geoss2s", "nmme/cansipsic4", "nmme/spear", "nmme/cesm1"]
+
+
+@tool(open_world=True, idempotent=False, meta={"ui": {"resourceUri": OUTLOOK_URI}, **OUTLOOK_TOOL_META})
 def seasonal_outlook(
     init: Annotated[str, Field(description='Forecast issuance month, "YYYY-MM", e.g. "2025-02".')],
     target: Annotated[str, Field(description='Target season as month initials, e.g. "MAM", "OND", "JJAS".')],
     region: RegionArg,
     models: Annotated[list[str], Field(
-        description='Forecast model product ids from list_products, e.g. ["c3s/ecmwf-monthly", "nmme/ccsm4"].',
-        min_length=1)] = ["nmme/ccsm4"],
+        description='Forecast model product ids from list_products, e.g. ["c3s/ecmwf-monthly", "nmme/ccsm4"]. '
+                    'Defaults to the six NMME precipitation models; keep several unless the user asks for one.',
+        min_length=1)] = NMME_PRECIP_MODELS,
     predictand: Annotated[str, Field(
         description='Observation product used as the predictand, e.g. "obs/chirps-v3-monthly" (rainfall) '
                     'or "obs/era5" (temperature).')] = "obs/chirps-v3-monthly",
@@ -131,29 +144,54 @@ def seasonal_outlook(
     cv_window: Annotated[int, Field(
         description="Years left out per cross-validation fold (5 matches PyCPT).", ge=1, le=11)] = 5,
     title: Annotated[str | None, Field(description="Map title; default is built from the request.")] = None,
+    wait_seconds: Annotated[int, Field(
+        description="How long to wait for a fresh run before answering with status 'running' (0 only checks). "
+                    "Cached and quick runs return at once regardless.", ge=0, le=55)] = DEFAULT_WAIT_SECONDS,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Produce a complete seasonal outlook in one call: fetch the models and
     observations, run the multi-model seasonal pipeline with leave-year-out
     cross-validation, verify it, and draw the tercile-probability map.
 
-    Takes minutes: models come from CDS/NMME sources on first use and are
-    cached on the server afterwards.
+    Repeats of the same request return instantly. A first run for a region
+    fetches the models and can take minutes, longer than a tool call may run:
+    the run then continues on the server and the call answers {status:
+    "running", request, elapsed_seconds, poll_after_seconds, message}. Tell
+    the user the outlook is computing and that the card fills in by itself;
+    to collect it yourself, call again with the same arguments after
+    poll_after_seconds. Complete results carry status "done".
+
+    Hosts that support MCP Apps render the result as an interactive map. After
+    the card renders, give a two-to-three sentence high-level reading: where
+    the signal is, how much to trust it given the skill, and the main caveat.
+    Use the highlights; do not repeat numbers the card already shows.
 
     Returns: {tercile_map (handle, PNG), tercile_forecast (handle, NetCDF
-    (tercile, lat, lon)), cv_hindcast (handle, NetCDF (year, tercile, lat,
-    lon)), deterministic (handle), skill: {rpss, ...}, metadata, models}.
-    Show the map with get_output(tercile_map).
+    (tercile, lat, lon)), cv_hindcast (handle), deterministic (handle),
+    skill: {rpss, ...}, metadata, models, bounds [lat_s, lat_n, lon_w, lon_e],
+    request (the arguments used), highlights {region_shares, countries,
+    strongest, skill_verdict, region_label, summary}, summary, palette (how the
+    map is coloured: describe colours from this, never from memory)}.
+    Show the map with get_output(tercile_map) when no widget is rendered.
     Example: seasonal_outlook(init="2025-02", target="MAM", region=[-12, 6, 28, 42],
     models=["c3s/ecmwf-monthly", "nmme/ccsm4"])
     """
     for product in list(models) + [predictand]:
         _acmaddl._require_product(product)
-    return recipes.seasonal_outlook(
-        tenant=_tenant(ctx), models=list(models), predictand=predictand, variable=variable,
-        init=init, target=target, region=region, hindcast=list(hindcast), method=method,
-        cv_window=cv_window, title=title,
-    )
+    tenant = _tenant(ctx)
+    kwargs: dict[str, Any] = dict(models=list(models), predictand=predictand, variable=variable, init=init,
+                                  target=target, region=region, hindcast=list(hindcast), method=method,
+                                  cv_window=cv_window, title=title)
+    status, payload = jobs.registry.run(
+        tenant, recipes.outlook_key(**kwargs),
+        lambda: recipes.seasonal_outlook(tenant=tenant, **kwargs), wait=wait_seconds)
+    if status == "running":
+        return {"status": "running", "request": recipes.normalised_request(**kwargs),
+                "elapsed_seconds": payload["elapsed_seconds"], "poll_after_seconds": POLL_AFTER_SECONDS,
+                "message": "The outlook is computing on the server; a first run for a region fetches the "
+                           "models and can take a few minutes. The card fills in by itself; to collect the "
+                           "result otherwise, call seasonal_outlook again with the same arguments."}
+    return {"status": "done", **payload}
 
 
 # --------------------------------------------------------------------------
@@ -301,6 +339,42 @@ def get_output(
         info["path"] = str(path)
         info["note"] = "No public URL configured (S2S_PUBLIC_BASE_URL); the path is on the server host."
     return [TextContent(type="text", text=json.dumps(info))]
+
+
+@tool(read_only=True, meta=APP_ONLY_META)
+def outlook_grid(
+    handle: Annotated[str, Field(description="Handle of a (tercile, lat, lon) probability forecast, "
+                                             "e.g. seasonal_outlook's tercile_forecast.")],
+    max_cells: Annotated[int, Field(description="Upper bound on grid cells after block-averaging.",
+                                    ge=1000, le=60000)] = 20000,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """Probability grid for the outlook widget (used by the widget, not by agents):
+    the forecast block-averaged to at most max_cells cells, plus the palette.
+
+    Returns: {handle, bounds, lat, lon, factor, below, normal, above, style}.
+    Example: outlook_grid(handle="out_0123456789ab")
+    """
+    import xarray as xr
+
+    tenant = _tenant(ctx)
+    path = handles.resolve(tenant, handle)
+    try:
+        with xr.open_dataset(path) as ds:
+            names = list(ds.data_vars)
+            var = "probability" if "probability" in names else (names[0] if len(names) == 1 else None)
+            if var is None:
+                raise ToolError(f"{handle!r} holds {len(names)} data variables ({', '.join(names[:6])}); "
+                                "outlook_grid needs a single (tercile, lat, lon) probability field.")
+            payload = grid.coarsen_probs(ds[var].load(), max_cells=max_cells)
+    except ToolError:
+        raise
+    except ValueError as exc:
+        raise ToolError(f"{handle!r}: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        # Only the exception type: OS-level messages can carry the host path.
+        raise ToolError(f"Could not read {handle!r} as a probability field ({type(exc).__name__}).") from exc
+    return {"handle": handle, **payload, "style": grid.tercile_style()}
 
 
 # --------------------------------------------------------------------------
