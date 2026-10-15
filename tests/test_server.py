@@ -12,7 +12,8 @@ from s2s_mcp import handles, server
 from tests.conftest import run
 
 DEFAULT_TOOLS = {"seasonal_outlook", "run_pipeline", "list_operations", "describe_operation",
-                 "list_products", "describe_dataset", "list_outputs", "get_output", "outlook_grid"}
+                 "list_products", "describe_dataset", "list_outputs", "get_output", "outlook_grid",
+                 "view_output", "output_image"}
 
 
 def test_default_surface_is_small():

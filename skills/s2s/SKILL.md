@@ -40,6 +40,10 @@ Data conventions the primitives expect (from africas2s): hindcast `(year, member
 
 Rules that bite: tercile metrics (`rpss`, `roc`) need tercile probabilities from cross-validation, never a fit scored on its own training years; `africas2s.calibrate` does not regrid (downscale methods do).
 
+## Showing a map
+
+After a pipeline step that draws a PNG (`africas2s.plot_field`, `africas2s.plot_terciles`), call `view_output(handle)` so the user sees the map as a card instead of a link. `get_output` remains the way to fetch data files.
+
 ## Housekeeping
 
 `list_outputs` shows your handles. `describe_dataset(handle)` shows dims, coordinates, and units. Handles belong to your tenant; another agency cannot read them.

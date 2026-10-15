@@ -28,7 +28,7 @@ from acmaddl.mcp import server as _acmaddl
 from africas2s.mcp import server as _africas2s
 
 from . import grid, handles, jobs, pipeline, recipes
-from .apps import APP_ONLY_META, OUTLOOK_TOOL_META, OUTLOOK_URI, apps
+from .apps import APP_ONLY_META, IMAGE_TOOL_META, IMAGE_URI, OUTLOOK_TOOL_META, OUTLOOK_URI, apps
 from .tenancy import tenant_dir, tenant_from_headers, tenant_mode
 
 _SKILL_DIR = Path(__file__).resolve().parents[2] / "skills" / "s2s"
@@ -338,7 +338,88 @@ def get_output(
     if url is None:
         info["path"] = str(path)
         info["note"] = "No public URL configured (S2S_PUBLIC_BASE_URL); the path is on the server host."
+    table = _small_table(path)
+    if table is not None:
+        info["values"] = table
+        info["values_note"] = (f"Inline because the dataset is small ({len(table)} rows). "
+                               "Larger datasets return only the download link.")
     return [TextContent(type="text", text=json.dumps(info))]
+
+
+_SMALL_TABLE_MAX_CELLS = 2000
+
+
+def _small_table(path) -> list[dict[str, Any]] | None:
+    """Rows of a small NetCDF (zonal statistics, skill tables) so a thin agent can
+    read the numbers without downloading the file. None for anything larger than
+    ``_SMALL_TABLE_MAX_CELLS`` values, non-NetCDF files, or unreadable ones."""
+    if str(path).rsplit(".", 1)[-1].lower() not in {"nc", "nc4", "netcdf"}:
+        return None
+    try:
+        import math
+        import numpy as np
+        import xarray as xr
+        with xr.open_dataset(path) as ds:
+            cells = sum(int(np.prod(v.shape)) for v in ds.data_vars.values())
+            if cells == 0 or cells > _SMALL_TABLE_MAX_CELLS:
+                return None
+            df = ds.to_dataframe().reset_index()
+        rows: list[dict[str, Any]] = []
+        for rec in df.to_dict(orient="records"):
+            clean = {}
+            for k, v in rec.items():
+                if isinstance(v, (np.floating, float)):
+                    clean[k] = None if math.isnan(v) else round(float(v), 4)
+                elif isinstance(v, np.integer):
+                    clean[k] = int(v)
+                else:
+                    clean[k] = v if isinstance(v, (str, int, bool)) or v is None else str(v)
+            rows.append(clean)
+        return rows
+    except Exception:  # noqa: BLE001 - preview is best-effort
+        return None
+
+
+@tool(read_only=True, meta={"ui": {"resourceUri": IMAGE_URI}, **IMAGE_TOOL_META})
+def view_output(
+    handle: Annotated[str, Field(description="Handle (out_...) of a PNG output, e.g. the map from africas2s.plot_field or plot_terciles.")],
+    title: Annotated[str | None, Field(description="Caption for the card. Default: the output's label.")] = None,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """Show a PNG output as an interactive card. In hosts with MCP Apps the map
+    renders inline with Expand and Open actions; elsewhere the text result carries
+    the download link. Call this after any plot step so the user sees the map
+    rather than a link. For data files use get_output.
+
+    Returns: {handle, title, label, media_type, size_bytes, download_url}.
+    """
+    tenant = _tenant(ctx)
+    handles.resolve(tenant, handle)
+    meta = handles.describe(tenant, handle)
+    if meta.get("media_type") != "image/png":
+        raise ToolError(f"{handle} is {meta.get('media_type') or 'not an image'}; view_output shows PNG maps. "
+                        "Use get_output for data files.")
+    return {"handle": handle, "title": title or meta.get("label"), "label": meta.get("label"),
+            "media_type": "image/png", "size_bytes": meta.get("size_bytes"),
+            "download_url": _download_url(tenant, handle)}
+
+
+@tool(read_only=True, meta=APP_ONLY_META)
+def output_image(
+    handle: Annotated[str, Field(description="Handle of a PNG output.")],
+    ctx: Context = None,
+) -> dict[str, Any]:
+    """The bytes of a PNG output for the map card (app-only; agents use get_output).
+
+    Returns: {handle, media_type, data_base64}.
+    """
+    tenant = _tenant(ctx)
+    path = handles.resolve(tenant, handle)
+    meta = handles.describe(tenant, handle)
+    if meta.get("media_type") != "image/png":
+        raise ToolError(f"{handle} is not a PNG output.")
+    return {"handle": handle, "media_type": "image/png",
+            "data_base64": base64.b64encode(path.read_bytes()).decode("ascii")}
 
 
 @tool(read_only=True, meta=APP_ONLY_META)

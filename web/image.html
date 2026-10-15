@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Map</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { margin: 0; font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      .card { padding: 8px 10px 10px; }
+      .bar { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+      .title { font-weight: 600; }
+      .actions { display: flex; gap: 6px; }
+      .actions button, .actions a { font: inherit; padding: 2px 8px; border: 1px solid currentColor; border-radius: 4px;
+        background: transparent; color: inherit; text-decoration: none; cursor: pointer; opacity: .8; }
+      .actions button:hover, .actions a:hover { opacity: 1; }
+      img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+      .full img { max-height: calc(100vh - 60px); width: auto; }
+      .note { opacity: .7; }
+      .error { color: #b00020; }
+    </style>
+  </head>
+  <body>
+    <div id="root" class="card" aria-live="polite"></div>
+    <script type="module" src="/src/image.ts"></script>
+  </body>
+</html>
