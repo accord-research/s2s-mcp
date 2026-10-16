@@ -30,7 +30,7 @@ overrides = [{ name = "zarr", specifier = ">=2.18.3" }]
 [[package]]
 name = "acmaddl"
 version = "0.2.0"
-source = { git = "https://github.com/ACMAD-Niamey/acmadDL?branch=main#fe52c43dc6977710f1d3a768fc8e01306d14717b" }
+source = { git = "https://github.com/ACMAD-Niamey/acmadDL?branch=main#ce1dc63ae11d66d1d7d0515a02992e6eea8be032" }
 dependencies = [
     { name = "cdsapi" },
     { name = "cfgrib" },
@@ -75,7 +75,7 @@ wheels = [
 [[package]]
 name = "africas2s"
 version = "0.2.0"
-source = { git = "https://github.com/ACMAD-Niamey/africas2s?branch=main#064911e202b1d73243125348881e7ad7484a91af" }
+source = { git = "https://github.com/ACMAD-Niamey/africas2s?branch=main#849c1094b6cc68698e67d2b5d5f4cbe94608d44c" }
 dependencies = [
     { name = "cartopy" },
     { name = "cfgrib" },

@@ -1,6 +1,9 @@
+import base64
 import json
 
+import numpy as np
 import pytest
+import xarray as xr
 from mcp.client import Client
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -12,7 +15,8 @@ from s2s_mcp import handles, server
 from tests.conftest import run
 
 DEFAULT_TOOLS = {"seasonal_outlook", "run_pipeline", "list_operations", "describe_operation",
-                 "list_products", "describe_dataset", "list_outputs", "get_output", "outlook_grid"}
+                 "list_products", "describe_dataset", "list_outputs", "get_output", "outlook_grid",
+                 "view_output", "output_image"}
 
 
 def test_default_surface_is_small():
@@ -139,14 +143,24 @@ def test_outlook_tool_is_an_mcp_app():
     assert "two-to-three sentence" in tools["seasonal_outlook"].description
 
 
-def test_outlook_resource_is_served_as_app():
+def test_view_output_tool_is_an_mcp_app():
+    tools = {t.name: t for t in run(server.mcp.list_tools())}
+    meta = tools["view_output"].meta
+    assert meta["ui"] == {"resourceUri": "ui://s2s/image"}
+    assert meta["openai/outputTemplate"] == "ui://s2s/image"      # ChatGPT reads only its alias
+    assert meta["openai/toolInvocation/invoking"] and meta["openai/toolInvocation/invoked"]
+    assert tools["output_image"].meta == {"ui": {"visibility": ["app"]}}   # bytes never reach the model
+
+
+@pytest.mark.parametrize("uri", ["ui://s2s/outlook", "ui://s2s/image"])
+def test_widget_resources_are_served_as_apps(uri):
     async def scenario():
         async with Client(server.mcp, extensions=[advertise(EXTENSION_ID, {"mimeTypes": [APP_MIME_TYPE]})]) as client:
             assert EXTENSION_ID in client.server_capabilities.extensions
             listed = {str(r.uri): r for r in (await client.list_resources()).resources}
-            assert listed["ui://s2s/outlook"].mime_type == APP_MIME_TYPE
-            assert listed["ui://s2s/outlook"].meta == {"ui": {"prefersBorder": True}}
-            read = await client.read_resource("ui://s2s/outlook")
+            assert listed[uri].mime_type == APP_MIME_TYPE
+            assert listed[uri].meta == {"ui": {"prefersBorder": True}}
+            read = await client.read_resource(uri)
             body = read.contents[0]
             assert body.mime_type == APP_MIME_TYPE
             assert body.text.lstrip().lower().startswith("<!doctype html>")
@@ -183,16 +197,77 @@ def test_widget_html_placeholder_when_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(_apps, "OUTLOOK_HTML", tmp_path / "missing.html")
     html = _apps.widget_html()
     assert html.lower().startswith("<!doctype html>") and "npm run build" in html
+    assert "npm run build" in _apps.widget_html(tmp_path / "also-missing.html")
 
 
-def test_built_widget_is_shipped():
-    html = _apps.OUTLOOK_HTML.read_text(encoding="utf-8")
+@pytest.mark.parametrize("built", ["OUTLOOK_HTML", "IMAGE_HTML"])
+def test_built_widgets_are_shipped(built):
+    path = getattr(_apps, built)
+    html = path.read_text(encoding="utf-8")
     assert html.lower().startswith("<!doctype html>")
-    assert "npm run build" not in html, "placeholder is still checked in; run npm run build in web/"
+    assert "npm run build" not in html, f"placeholder is still checked in for {path.name}; run npm run build in web/"
     assert '<script type="module"' in html
     assert 'src="http' not in html and 'href="http' not in html     # no external origins (CSP is deny-by-default)
-    assert _apps.OUTLOOK_HTML.stat().st_size < 1_000_000
+    assert path.stat().st_size < 1_000_000
+
+
+def test_country_borders_are_shipped():
     assert (_apps.WEB_DIR / "africa-countries.geojson").stat().st_size > 10_000
+
+
+# A 1x1 transparent PNG: enough to exercise the handle plumbing without matplotlib.
+ONE_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+
+
+def _register(suffix, write, label):
+    handle, path = handles.reserve("default", suffix)
+    write(path)
+    handles.register("default", handle, kind="figure" if suffix == ".png" else "dataset", label=label)
+    return handle
+
+
+def test_view_output_card_and_bytes(monkeypatch):
+    """The card payload carries no pixels; the widget fetches them through the app-only tool."""
+    png = _register(".png", lambda p: p.write_bytes(ONE_PIXEL_PNG), "OND map")
+    assert server.view_output(png) == {
+        "handle": png, "title": "OND map", "label": "OND map", "media_type": "image/png",
+        "size_bytes": len(ONE_PIXEL_PNG), "download_url": None}
+    assert server.view_output(png, title="Kenya OND")["title"] == "Kenya OND"
+
+    image = server.output_image(png)
+    assert image["media_type"] == "image/png" and base64.b64decode(image["data_base64"]) == ONE_PIXEL_PNG
+
+    monkeypatch.setenv("S2S_PUBLIC_BASE_URL", "https://s2s.example.org/")
+    assert server.view_output(png)["download_url"] == f"https://s2s.example.org/outputs/default/{png}"
+
+
+def test_view_output_rejects_data_files_and_unknown_handles():
+    nc = _register(".nc", lambda p: xr.Dataset({"a": ("i", np.zeros(3))}).to_netcdf(p), "a table")
+    with pytest.raises(ToolError, match="get_output"):
+        server.view_output(nc)
+    with pytest.raises(ToolError, match="not a PNG"):
+        server.output_image(nc)
+    with pytest.raises(ToolError, match="Unknown handle"):
+        server.view_output("out_000000000000")
+
+
+def test_get_output_inlines_small_tables_only():
+    """Zonal statistics and skill tables come back as rows (NaN as null, floats rounded);
+    anything above the cap stays a download link."""
+    table = _register(".nc", lambda p: xr.Dataset(
+        {"mean": ("region", [1.23456, np.nan, 3.0]), "count": ("region", [4, 5, 6])},
+        coords={"region": ["north", "centre", "south"]}).to_netcdf(p), "zonal")
+    info = json.loads(server.get_output(table)[0].text)
+    assert info["values"] == [{"region": "north", "mean": 1.2346, "count": 4},
+                              {"region": "centre", "mean": None, "count": 5},
+                              {"region": "south", "mean": 3.0, "count": 6}]
+    assert "3 rows" in info["values_note"]
+
+    big = _register(".nc", lambda p: xr.Dataset(
+        {"x": ("i", np.zeros(server._SMALL_TABLE_MAX_CELLS + 1))}).to_netcdf(p), "big")
+    info = json.loads(server.get_output(big)[0].text)
+    assert "values" not in info and info["media_type"] == "application/x-netcdf"
 
 
 def test_outlook_grid_multivariable_error_names_handle_not_path():

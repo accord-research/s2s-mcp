@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "borders": "node scripts/borders.mjs",
-    "build": "npm run borders && vite build",
+    "build": "npm run borders && vite build && WIDGET=image vite build",
     "dev": "vite",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

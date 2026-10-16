@@ -10,10 +10,10 @@ acmadDL and africas2s each ship a thin MCP server for local use (`acmaddl-mcp`, 
 
 - **Recipes.** `seasonal_outlook` runs ACMAD's standard workflow in one call: fetch the forecast models and the observations, run the multi-model seasonal pipeline with leave-year-out cross-validation, verify it, and draw the tercile-probability map.
 - **A pipeline runner.** `run_pipeline` chains any of the underlying operations (`acmaddl.fetch`, `africas2s.downscale`, `africas2s.skill`, ...) on the server, with `$step.field` references between steps, and returns only the final result. This is the "code execution with MCP" idea, hosted server-side for agents that cannot run code, without running user code: the step vocabulary is exactly the primitives' schemas.
-- **Progressive disclosure.** The default tool surface is eight tools (plus `outlook_grid`, which only the widget calls). The twenty-odd primitives are reachable by name through `run_pipeline` and described on demand by `list_operations` / `describe_operation`. `--advanced` also registers each primitive as a tool.
-- **Handles instead of paths.** Every output is a server-minted `out_<hex>` handle, scoped to the calling tenant. `get_output` returns a PNG inline as an image and a data file as a download link.
+- **Progressive disclosure.** The default tool surface is nine tools (plus `outlook_grid` and `output_image`, which only the widgets call). The twenty-odd primitives are reachable by name through `run_pipeline` and described on demand by `list_operations` / `describe_operation`. `--advanced` also registers each primitive as a tool.
+- **Handles instead of paths.** Every output is a server-minted `out_<hex>` handle, scoped to the calling tenant. `get_output` returns a PNG inline as an image and a data file as a download link; a small data file (at most 2,000 values, such as zonal statistics or a skill table) also carries its rows inline, so a thin agent can quote the numbers without a round trip. `view_output` shows a PNG as a card in hosts with MCP Apps.
 - **Tenancy plumbing.** Per-tenant output directories, tenant resolution from a proxy-set header, and a download route on the HTTP app. Authentication itself belongs to the proxy or to a future OAuth `token_verifier`.
-- **An interactive outlook (MCP Apps).** In hosts that implement [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) (ChatGPT, Claude, Claude Desktop, VS Code), `seasonal_outlook` renders as a live tercile map with hover probabilities, a method switch (CCA / BCSD / climatology re-run on cached data), computed highlights, an Explain action that asks the model for a short reading, and a fullscreen view. Text-only hosts see the same result as JSON and can still fetch the PNG with `get_output`.
+- **An interactive outlook (MCP Apps).** In hosts that implement [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) (ChatGPT, Claude, Claude Desktop, VS Code), `seasonal_outlook` renders as a live tercile map with hover probabilities, a method switch (CCA / BCSD / climatology re-run on cached data), computed highlights, an Explain action that asks the model for a short reading, and a fullscreen view. Text-only hosts see the same result as JSON and can still fetch the PNG with `get_output`. Any PNG a pipeline step draws (`africas2s.plot_field`, `africas2s.plot_terciles`) renders the same way through `view_output`: a card with the map, an Expand action and a link to the file.
 
 It holds no data-access or forecasting logic of its own. Every step is a documented library call.
 
@@ -55,6 +55,7 @@ seasonal_outlook(init="2025-02", target="MAM", region=[-12, 6, 28, 42],
     summary: "Above-normal dominant over 41% …",
     palette: "Map colours: greens mark above-normal (wetter) cells, yellows through reds mark below-normal …"}
 get_output("out_…")   # the map, inline
+view_output("out_…")  # the map as a card in ChatGPT or Claude
 ```
 
 The same request twice is served from the per-tenant result cache. `highlights` are computed on the server (area-weighted shares of the dominant tercile for the region and per country, the strongest wet and dry signals, a one-word skill verdict) so a model's description of the outlook is grounded in numbers rather than in the picture.
@@ -73,14 +74,14 @@ run_pipeline(steps=[
 ], keep=["fc"])
 ```
 
-The agent sees the map handle and a brief summary of `fc`. The hindcast and observation files never enter its context.
+The agent sees the map handle and a brief summary of `fc`; `view_output` on the map handle shows it as a card. `get_output` on a data handle gives a download link, and includes the rows when the file is small (at most 2,000 values, as zonal statistics and skill tables are). The hindcast and observation files never enter its context.
 
 ## Interactive outlook in ChatGPT or Claude
 
-The widget is a single HTML file (`src/s2s_mcp/web/outlook.html`, built from `web/`) served as the MCP App resource `ui://s2s/outlook`; `seasonal_outlook` points at it (`_meta.ui.resourceUri`, plus ChatGPT's `openai/outputTemplate` alias) and the app-only tool `outlook_grid` hands it a coarsened probability grid plus the ACMAD palette. The bundle is self-contained (no external script, style, or connect origins) and checked in, so the server needs no Node at runtime. Rebuild after changing `web/`:
+Two widgets ship as self-contained HTML files built from `web/` and checked in under `src/s2s_mcp/web/`, each served as an MCP App resource: `outlook.html` (`ui://s2s/outlook`) for `seasonal_outlook`, and `image.html` (`ui://s2s/image`) for `view_output`, which shows any PNG output (a `plot_field` or `plot_terciles` map) as a card with Expand and Open PNG actions. A tool points at its widget through `_meta.ui.resourceUri` plus ChatGPT's `openai/outputTemplate` alias. The widgets fetch what they draw through app-only tools the model does not see: `outlook_grid` hands the outlook a coarsened probability grid plus the ACMAD palette, and `output_image` hands the map card the PNG bytes, so the model only receives the handle, caption, size and download link. The bundles have no external script, style, or connect origins, so the server needs no Node at runtime. Rebuild after changing `web/`:
 
 ```bash
-cd web && npm install && npm run build      # writes src/s2s_mcp/web/outlook.html and africa-countries.geojson
+cd web && npm install && npm run build      # writes src/s2s_mcp/web/outlook.html, image.html and africa-countries.geojson
 ```
 
 To use it from a laptop:
@@ -88,7 +89,7 @@ To use it from a laptop:
 1. `uv run s2s-mcp --transport streamable-http --stateless --port 8080` (with `CDSAPI_URL`/`CDSAPI_KEY` set if a model needs CDS).
 2. `npx cloudflared tunnel --url http://localhost:8080 --http-host-header localhost:8080` and copy the `https://….trycloudflare.com` URL (it changes on every restart). The `--http-host-header` flag matters: the MCP SDK's DNS-rebinding guard only accepts `localhost`/`127.0.0.1` Host headers, and without the rewrite every request through the tunnel fails with "Invalid Host header".
 3. ChatGPT: Settings → Apps & Connectors → Advanced → enable Developer mode, then create a connector with `https://<tunnel>/mcp` and no authentication. Claude: Settings → Connectors → Add custom connector with the same URL.
-4. Ask for an outlook. Hover the map for the three probabilities, switch the method, click Explain for the model's reading, Expand for the fullscreen map. Repeated requests and the method switch are served from the result cache (`S2S_RECIPE_CACHE=0` disables it).
+4. Ask for an outlook. Hover the map for the three probabilities, switch the method, click Explain for the model's reading, Expand for the fullscreen map. Repeated requests and the method switch are served from the result cache (`S2S_RECIPE_CACHE=0` disables it). A map drawn by `run_pipeline` shows as the same kind of card once the model calls `view_output` on its handle.
 
 Forecast-year probabilities under `method="cca"` come from CPT's per-model error model (`probability_aggregation="cpt_per_model"` in africas2s), which stays well-defined with a single model. The other methods use africas2s's pooled aggregation, whose spread comes from disagreement between models; with one model it has none, and the map collapses to 0/1 probabilities until africas2s supports error-based probabilities for those methods.
 

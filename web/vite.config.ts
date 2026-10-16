@@ -8,7 +8,7 @@ export default defineConfig({
   build: {
     outDir: "../src/s2s_mcp/web",
     emptyOutDir: false,
-    rollupOptions: { input: "outlook.html" },
+    rollupOptions: { input: `${process.env.WIDGET ?? "outlook"}.html` },
     target: "es2022",
     cssCodeSplit: false,
     assetsInlineLimit: 100_000_000,
