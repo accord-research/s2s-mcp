@@ -1,11 +1,12 @@
-"""MCP Apps (SEP-1865) wiring: the outlook widget resource and tool metadata.
+"""MCP Apps (SEP-1865) wiring: the widget resources and tool metadata.
 
-The widget is a single self-contained HTML file built from ``web/`` and
-checked in at ``src/s2s_mcp/web/outlook.html``. It is served under the
-``ui://`` scheme with the MCP Apps mime type; hosts that support apps render
-it in a sandboxed iframe and push ``seasonal_outlook``'s result into it.
-Hosts that do not simply see the tool's text. The ``Apps`` instance must be
-fully populated before ``MCPServer(extensions=[apps])`` is constructed.
+Each widget is a self-contained HTML file built from ``web/`` and checked in
+under ``src/s2s_mcp/web/``: ``outlook.html`` for ``seasonal_outlook`` and
+``image.html`` for ``view_output``. They are served under the ``ui://`` scheme
+with the MCP Apps mime type; hosts that support apps render them in a
+sandboxed iframe and push the tool's result into them. Hosts that do not
+simply see the tool's text. The ``Apps`` instance must be fully populated
+before ``MCPServer(extensions=[apps])`` is constructed.
 """
 
 from __future__ import annotations

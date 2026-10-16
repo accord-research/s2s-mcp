@@ -318,10 +318,11 @@ def get_output(
 ) -> list[ImageContent | TextContent]:
     """Fetch an output: a PNG map is returned inline as an image; a data file
     is returned as a download link (when the server has a public URL) plus
-    its description.
+    its description. A small data file (at most 2,000 values, e.g. zonal
+    statistics or a skill table) also carries its rows inline as `values`.
 
     Returns: an image block for PNGs, otherwise a JSON text block
-    {handle, media_type, size_bytes, download_url, path}.
+    {handle, media_type, size_bytes, download_url, path, values?, values_note?}.
     """
     import json
 
