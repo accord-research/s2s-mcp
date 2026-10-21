@@ -40,6 +40,8 @@ Data conventions the primitives expect (from africas2s): hindcast `(year, member
 
 Rules that bite: tercile metrics (`rpss`, `roc`) need tercile probabilities from cross-validation, never a fit scored on its own training years; `africas2s.calibrate` does not regrid (downscale methods do).
 
+Subseasonal data: the `weather-skills/*` products (`list_products`) are Rhiza's fetchers for IFS 46-day, GEFS 35-day, CHC SubC outlooks and daily observations. Each fetch is one issuance (`init="YYYY-MM-DD"`), control member only, with no hindcast stream, so they suit a fetch-and-plot chain in `run_pipeline` and cannot be `seasonal_outlook` `models`, which need a hindcast to cross-validate. Say so when you show one: there is no skill score behind it.
+
 ## Showing a map
 
 After a pipeline step that draws a PNG (`africas2s.plot_field`, `africas2s.plot_terciles`), call `view_output(handle)` so the user sees the map as a card instead of a link. `get_output` remains the way to fetch data files.

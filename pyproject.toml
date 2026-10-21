@@ -16,6 +16,31 @@ dependencies = [
     "africas2s[mcp]>=0.2",
     "xarray",
     "numpy",
+    # Rhiza's weather-skills stack, so the host can serve acmadDL's
+    # `weather-skills/*` products (IFS 46-day, GEFS 35-day, CHC SubC outlooks,
+    # ERA5, IMERG, ...) and run their transforms. acmadDL keeps these in a uv
+    # dependency *group* (PyPI metadata cannot carry git URLs) and groups do
+    # not propagate to consumers, so this mirrors acmadDL's `weather-skills`
+    # group. Keep the three git pins in [tool.uv.sources] identical to
+    # acmadDL's: moving a pin there means re-captured fixtures and a
+    # cache-version bump on their side.
+    "weather-skills-core",
+    "weather-skills",
+    "chc-skills",
+    "ecmwf-datastores-client==0.4.2",
+    "dynamical-catalog==0.5.0",
+    "pint-xarray>=0.6",
+    "cf-xarray>=0.11",
+    "aiohttp",
+    "dask",
+    "gcsfs",
+    "h5netcdf",
+    "h5py",
+    "cartopy",
+    "xarray-regrid",
+    "nc-time-axis",
+    "pillow",
+    "shapely>=2.1",
 ]
 
 [project.urls]
@@ -35,11 +60,19 @@ s2s-mcp = "s2s_mcp.server:main"
 # then delete this block so the PyPI pins above take over.
 acmadDL = { git = "https://github.com/ACMAD-Niamey/acmadDL", branch = "main" }
 africas2s = { git = "https://github.com/ACMAD-Niamey/africas2s", branch = "main" }
+# Rhiza weather-skills provider packages, pinned to the same commits as
+# acmadDL's pyproject (their `main` is a release branch that auto-bumps skill
+# versions). Bump these only together with acmadDL.
+weather-skills-core = { git = "https://github.com/rhiza-research/weather-skills-core", rev = "e118b9531181224cb1459efbd9f2b114117f0a79" }
+weather-skills = { git = "https://github.com/rhiza-research/weather-skills", rev = "4f95364b323e601f5cbd43ee3af39d2d77617596" }
+chc-skills = { git = "https://github.com/rhiza-research/chc-skills", rev = "20bce784a77a10a1fe7a368e29669a5d673eb176" }
 
 [tool.uv]
-# sheerwater (via acmadDL) pins zarr==2.18.3; acmadDL's own override relaxes
-# it so icechunk can co-resolve. Mirror that here so the host env resolves.
-override-dependencies = ["zarr>=2.18.3"]
+# sheerwater (via acmadDL) hard-pins zarr==2.18.3 and xarray==2025.1.0; both
+# pins are stale and acmadDL overrides them so icechunk (zarr>=3) and the Rhiza
+# weather-skills stack (xarray>=2026.7) co-resolve. Mirror acmadDL's overrides
+# here so the host env resolves the same way.
+override-dependencies = ["zarr>=3.1.0", "xarray>=2026.7"]
 # eccodeslib only ships wheels for some platforms at its newest versions;
 # listing the environments we develop and deploy on makes uv pick a version
 # with wheels for all of them (Linux containers in production, Apple Silicon

@@ -35,6 +35,8 @@ Environment:
 | `S2S_PUBLIC_BASE_URL` | Public base URL, used to build download links for data outputs | unset |
 | `ACMADDL_CACHE_DIR` | acmadDL's shared download cache | `~/.nuthatch/caches` |
 | `CDSAPI_URL`, `CDSAPI_KEY` | Copernicus credentials, held by the host | |
+| `ECMWF_DATASTORES_URL`, `ECMWF_DATASTORES_KEY` | ECMWF Data Stores key for `weather-skills/ecmwf-s2s` (a Copernicus CDS key is refused) | |
+| `EARTHDATA_TOKEN` | NASA Earthdata token (bare token, not username/password) for `weather-skills/imerg-daily*` and `weather-skills/smap-daily` | |
 | `S2S_OUTLOOK_WAIT_SECONDS` | Default in-call wait of `seasonal_outlook` before it answers `status: "running"` (per-call `wait_seconds` overrides it, max 55) | `45` |
 | `S2S_RECIPE_CACHE` | `0` disables the per-tenant cache of `seasonal_outlook` results (keyed by arguments) | `1` |
 
@@ -107,4 +109,6 @@ uv run pytest -q
 cd web && npm install && npm test   # widget unit tests (vitest)
 ```
 
-Tests use synthetic data and stub acmadDL's network verbs; the africas2s pipeline runs for real. Until the `[mcp]` extras are released on PyPI, `pyproject.toml` resolves the two libraries from their `main` branches; delete the `[tool.uv.sources]` block after release so the PyPI pins take over.
+Tests use synthetic data and stub acmadDL's network verbs; the africas2s pipeline runs for real. Until the `[mcp]` extras are released on PyPI, `pyproject.toml` resolves the two libraries from their `main` branches; delete their `[tool.uv.sources]` entries after release so the PyPI pins take over.
+
+The host also carries Rhiza's weather-skills provider packages, so acmadDL's `weather-skills/*` products (IFS 46-day, GEFS 35-day, CHC SubC outlooks, ERA5, IMERG, ...) fetch through `run_pipeline` and their transforms are importable. acmadDL keeps these in a uv dependency group, which does not propagate to a consumer, so `pyproject.toml` lists them directly with the three provider repos pinned to the same commits as acmadDL's. Bump those pins only together with acmadDL; `tests/test_pipeline.py` fails if the stack is missing.
