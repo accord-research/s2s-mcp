@@ -40,7 +40,19 @@ Data conventions the primitives expect (from africas2s): hindcast `(year, member
 
 Rules that bite: tercile metrics (`rpss`, `roc`) need tercile probabilities from cross-validation, never a fit scored on its own training years; `africas2s.calibrate` does not regrid (downscale methods do).
 
-Subseasonal data: the `weather-skills/*` products (`list_products`) are Rhiza's fetchers for IFS 46-day, GEFS 35-day, CHC SubC outlooks and daily observations. Each fetch is one issuance (`init="YYYY-MM-DD"`), control member only, with no hindcast stream, so they suit a fetch-and-plot chain in `run_pipeline` and cannot be `seasonal_outlook` `models`, which need a hindcast to cross-validate. Say so when you show one: there is no skill score behind it.
+## Sub-seasonal: the next few weeks
+
+The `weather-skills/*` products (`list_products`) are Rhiza's fetchers for IFS 46-day, GEFS 35-day, AIFS, CHC SubC outlooks and daily observations. Each fetch is one issuance (`init="YYYY-MM-DD"`) with all members on a `lead_time` axis and no hindcast stream, so they cannot be `seasonal_outlook` `models`, which need a hindcast to cross-validate. "The next four weeks" is a three-step `run_pipeline` chain, one call per window:
+
+```
+[{"id": "f", "op": "acmaddl.fetch", "args": {"product": "weather-skills/ifs-ens-46d", "variable": "precip",
+                                             "init": "2026-10-19", "region": [-5, 5, 34, 42]}},
+ {"id": "w", "op": "africas2s.forecast_window", "args": {"forecast_path": "$f.handle", "window": "week2",
+                                                         "how": "sum", "ensemble_mean": true}},
+ {"id": "m", "op": "africas2s.plot_field", "args": {"path": "$w.handle", "title": "IFS week 2 rainfall total (mm)"}}]
+```
+
+`window` is `"week1"`…`"week4"`, `"day1_30"` or `[first_day, last_day]`; `how="sum"` turns a rate (mm/day) into a total in mm; leave `ensemble_mean` off to keep the `(member, lat, lon)` ensemble. Then `view_output` the map. Say when you show one that it is a raw model forecast with no skill score behind it.
 
 ## Showing a map
 
