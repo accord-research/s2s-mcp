@@ -18,6 +18,27 @@ def test_operations_discovered_from_both_servers():
     assert pipeline.OPERATIONS["africas2s.downscale"].summary.startswith("Bias-correct")
 
 
+def test_weather_skills_stack_is_installed_on_the_host():
+    """acmadDL keeps Rhiza's weather-skills provider packages in a uv dependency
+    group, which does not propagate here; the host lists them itself or every
+    `weather-skills/*` fetch stops at WeatherSkillsNotInstalled. Guard all three
+    links: the products are in the catalog the pipeline exposes, the provider
+    packages import, and a credential-free product passes acmadDL's config
+    health check (the skill loads and answers --help, offline)."""
+    from acmaddl import weather_skills
+
+    out = run(pipeline.run_pipeline([{"id": "p", "op": "acmaddl.list_products"}], "default"))
+    products = {row["product"] for row in out["result"]["result"]}   # the SDK wraps a list result
+    assert {"weather-skills/ifs-ens-46d", "weather-skills/gefs-35d", "weather-skills/ecmwf-s2s"} <= products
+
+    assert {"dynamical-fetch", "ecmwf-fetch", "subc-mme-fetch"} <= set(weather_skills.skills(kind="fetchers"))
+
+    health = run(pipeline.run_pipeline(
+        [{"id": "h", "op": "acmaddl.check_product", "args": {"product": "weather-skills/ifs-ens-46d"}}], "default"))
+    assert health["result"]["healthy"] is True, health["result"]
+    assert health["result"]["kind"] == "config"
+
+
 def test_resolve_references_and_handles(tmp_path):
     src = tmp_path / "f.nc"
     src.write_bytes(b"x")
@@ -50,7 +71,7 @@ def test_pipeline_fetch_downscale_skill_plot(fake_acmaddl):
     assert out["result"]["media_type"] == "image/png"
     assert handles.resolve("default", out["result"]["handle"]).read_bytes()[:4] == b"\x89PNG"
     fc = out["kept"]["fc"]
-    assert fc["dims"]["tercile"] == 3 and fc["variables"] == {"probability": None}
+    assert fc["dims"]["tercile"] == 3 and fc["variables"] == {"probability": "1"}   # CF dimensionless
     assert "coords" not in fc  # brief
     assert fake_acmaddl["fetch"][0]["year_index"] is True
     assert handles.owned("default", fake_acmaddl["fetch"][0]["destination"]) == out["steps"][0]["handle"]
