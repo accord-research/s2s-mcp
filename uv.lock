@@ -78,7 +78,7 @@ wheels = [
 [[package]]
 name = "africas2s"
 version = "0.2.0"
-source = { git = "https://github.com/ACMAD-Niamey/africas2s?branch=main#3a1bc731433ce59f2232950f74733bdbf889cb39" }
+source = { git = "https://github.com/ACMAD-Niamey/africas2s?branch=main#86be4da2ac8ef71034cbf59d1f6ea64f19d2dd8f" }
 dependencies = [
     { name = "cartopy" },
     { name = "cfgrib" },

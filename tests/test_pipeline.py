@@ -1,5 +1,6 @@
 import json
 
+import numpy as np
 import pytest
 import xarray as xr
 from mcp.server.mcpserver.exceptions import ToolError
@@ -11,7 +12,7 @@ from tests.conftest import run
 def test_operations_discovered_from_both_servers():
     names = set(pipeline.OPERATIONS)
     assert {"acmaddl.fetch", "acmaddl.zonal", "africas2s.downscale", "africas2s.skill",
-            "africas2s.plot_terciles"} <= names
+            "africas2s.forecast_window", "africas2s.plot_terciles"} <= names
     assert not {"acmaddl.start_fetch", "acmaddl.fetch_status", "acmaddl.list_jobs"} & names
     assert pipeline.OPERATIONS["acmaddl.fetch"].accepts_destination
     assert pipeline.OPERATIONS["africas2s.list_registry"].accepts_destination is False
@@ -76,6 +77,44 @@ def test_pipeline_fetch_downscale_skill_plot(fake_acmaddl):
     assert fake_acmaddl["fetch"][0]["year_index"] is True
     assert handles.owned("default", fake_acmaddl["fetch"][0]["destination"]) == out["steps"][0]["handle"]
     json.dumps(out)
+
+
+def test_pipeline_subseasonal_chain_fetch_window_plot(monkeypatch):
+    """The sub-seasonal chain the skill documents: a weather-skills fetch on a lead
+    axis, one window as an ensemble-mean rainfall total, a map."""
+    import acmaddl
+
+    days = np.arange(31)
+    fc = xr.DataArray(
+        np.broadcast_to(days[None, :, None, None, None].astype(float), (1, 31, 4, 3, 3)).copy(),
+        dims=("init_time", "lead_time", "member", "lat", "lon"),
+        coords={"init_time": np.array(["2026-10-19"], dtype="datetime64[ns]"),
+                "lead_time": days.astype("timedelta64[D]").astype("timedelta64[ns]"),
+                "member": np.arange(4), "lat": [-1.0, 0.0, 1.0], "lon": [36.0, 37.0, 38.0]},
+        name="precip", attrs={"units": "mm/day"})
+
+    def _fetch(product, variable, **kwargs):
+        assert product.startswith("weather-skills/")
+        ds = fc.to_dataset()
+        if kwargs.get("destination"):
+            ds.to_netcdf(kwargs["destination"])
+        return ds
+
+    monkeypatch.setattr(acmaddl, "fetch", _fetch)
+    steps = [
+        {"id": "f", "op": "acmaddl.fetch", "args": {"product": "weather-skills/ifs-ens-46d", "variable": "precip",
+                                                     "init": "2026-10-19", "region": [-5, 5, 34, 42]}},
+        {"id": "w", "op": "africas2s.forecast_window", "args": {"forecast_path": "$f.handle", "window": "week2",
+                                                                 "how": "sum", "ensemble_mean": True}},
+        {"id": "m", "op": "africas2s.plot_field", "args": {"path": "$w.handle", "title": "week 2"}},
+    ]
+    out = run(pipeline.run_pipeline(steps, "default", keep=["w"]))
+    assert [s["status"] for s in out["steps"]] == ["ok"] * 3
+    assert out["result"]["media_type"] == "image/png"
+    w = out["kept"]["w"]
+    assert w["dims"] == {"lat": 3, "lon": 3} and w["variables"] == {"precip": "mm"}
+    total = xr.open_dataarray(handles.resolve("default", w["handle"]))
+    assert float(total.isel(lat=0, lon=0)) == pytest.approx(77.0)   # 8+...+14 mm
 
 
 def test_pipeline_full_verbosity_and_errors(fake_acmaddl):
