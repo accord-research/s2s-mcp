@@ -467,7 +467,38 @@ def outlook_grid(
               description="How to use this server: recipes, pipelines, handles, conventions.")
 def skill_resource() -> str:
     path = _SKILL_DIR / "SKILL.md"
-    return path.read_text(encoding="utf-8") if path.is_file() else "SKILL.md not found in this install."
+    text = path.read_text(encoding="utf-8") if path.is_file() else "SKILL.md not found in this install."
+    return text + _geometries_section()
+
+
+_GEOMETRIES_DIR = Path(os.environ.get("S2S_GEOMETRIES_DIR") or (Path.home() / ".s2s-mcp" / "geometries")).expanduser()
+
+
+def _geometries_section() -> str:
+    """Boundary files the host makes available for acmaddl.zonal, with their
+    attribute names, so an agent can group by district without being told a path."""
+    if not _GEOMETRIES_DIR.is_dir():
+        return ""
+    rows = []
+    for f in sorted(_GEOMETRIES_DIR.iterdir()):
+        if f.suffix.lower() not in {".geojson", ".json", ".shp"}:
+            continue
+        props = ""
+        if f.suffix.lower() in {".geojson", ".json"}:
+            try:
+                import json
+                with f.open(encoding="utf-8") as fh:
+                    g = json.load(fh)
+                feats = g.get("features", [])
+                keys = list((feats[0].get("properties") or {}).keys()) if feats else []
+                props = f"{len(feats)} features; properties: {', '.join(keys)}"
+            except Exception:  # noqa: BLE001
+                props = "unreadable"
+        rows.append(f"- `{f}` — {props}")
+    if not rows:
+        return ""
+    return ("\n\n## Boundary files on this host\n\nPass one of these as `geometries` to `acmaddl.zonal` "
+            "(use a unique-id property for `by` and a name property for `label`):\n\n" + "\n".join(rows) + "\n")
 
 
 # --------------------------------------------------------------------------
