@@ -63,7 +63,7 @@ africas2s = { git = "https://github.com/ACMAD-Niamey/africas2s", branch = "main"
 # Rhiza weather-skills provider packages, pinned to the same commits as
 # acmadDL's pyproject (their `main` is a release branch that auto-bumps skill
 # versions). Bump these only together with acmadDL.
-weather-skills-core = { git = "https://github.com/rhiza-research/weather-skills-core", rev = "e118b9531181224cb1459efbd9f2b114117f0a79" }
+weather-skills-core = { git = "https://github.com/weather-skills/weather-skills-core", rev = "e118b9531181224cb1459efbd9f2b114117f0a79" }
 weather-skills = { git = "https://github.com/rhiza-research/weather-skills", rev = "4f95364b323e601f5cbd43ee3af39d2d77617596" }
 chc-skills = { git = "https://github.com/rhiza-research/chc-skills", rev = "20bce784a77a10a1fe7a368e29669a5d673eb176" }
 
